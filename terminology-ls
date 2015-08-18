@@ -1,0 +1,167 @@
+#!/usr/bin/python3
+
+import sys
+import os.path
+import functools
+
+import click
+
+from blessings import Terminal
+
+
+def memoize(obj):
+    cache = obj.cache = {}
+
+    @functools.wraps(obj)
+    def memoizer(*args, **kwargs):
+        key = str(args) + str(kwargs)
+        if key not in cache:
+            cache[key] = obj(*args, **kwargs)
+        return cache[key]
+    return memoizer
+
+
+class TerminologyTerm(object):
+
+    @staticmethod
+    def cmds(c):
+        """
+        returns a bytestring containing the command
+        """
+        return b'\x1b}' + c.encode('utf8') + b'\x00'
+
+    @classmethod
+    def cmd(cls, cmd):
+        """
+        send the specified cmd
+        """
+        cmds = cls.cmds(cmd)
+        sys.stdout.flush()
+        sys.stdout.buffer.write(cmds)
+        sys.stdout.flush()
+
+    @classmethod
+    def qs(cls):
+        """
+        return terminal width, height (in charblocks) and
+        charblock width and height
+        """
+        cls.cmd('qs')
+        qs = sys.stdin.readline(20).strip().split(';')
+        return (int(i) for i in qs)
+
+    @classmethod
+    def ibie(cls, width, rchar='!'):
+        cls.cmd('ib')
+        print(rchar*width, end='')
+        cls.cmd('ie')
+
+    @classmethod
+    def it(cls, width, height, path, rchar='!', link=None):
+        it = 'it{}{!s};{!s};'.format(rchar, width, height)
+        if link:
+            it += link + '\n'
+        it += path
+        cls.cmd(it)
+        cls.ibie(width, rchar)
+
+
+class NameGrid(object):
+    def __init__(self, names, size):
+        self.names = names
+        self.term = TerminologyTerm()
+        self.sizename = size
+        self.size = self.SIZES[size]
+
+    SIZES = { 'small': (2, 1),
+              'medium': (4, 2),
+              'large':(8, 4)
+             }
+
+    def __repr__(self):
+        return '<NameGrid size %s of %d names on %r column screen>' % (self.sizename, len(self.names), Terminal().width)
+
+    @memoize
+    def cols(self):
+        #w, h, fw, fh = self.term.qs()
+        w = Terminal().width or 0 # if not a tty, .width is None
+        return (w // self.colwidth()) or 3
+
+    @memoize
+    def rows(self):
+        n = len(self.names)
+        rows = n // self.cols()
+        if n % self.cols() != 0:
+            rows += 1
+        return rows
+
+    @memoize
+    def colwidth(self):
+        namemaxlen = max(len(n) for n in self.names)
+        colwidth = namemaxlen + 1 # buffer space
+        colwidth += self.size[0]
+        return colwidth
+
+    def rowheight(self):
+        return self.size[1]
+
+    def format_name(self, name, i):
+        """
+        return the i'th row of 'name' formatted
+        into a grid square
+        """
+        w, h = self.size
+        if name:
+            if i == 0:
+                self.term.it(w, h, os.path.abspath(name))
+            else:
+                self.term.ibie(w)
+                name = ''
+        fmt = "{:<" + str(self.colwidth()) + "}"
+        return fmt.format(name)
+
+
+def getitem(l, i, default):
+    """
+    return l[i] unless it would cause IndexError, then
+    return default
+    """
+    try:
+        return l[i]
+    except IndexError:
+        return default
+
+
+@click.command()
+@click.option('--all', '-a', is_flag=True, default=False, help="show hidden files")
+@click.option('--size', default='small', type=click.Choice(['small', 'medium', 'large']),
+              help="icon size")
+@click.option('--debug', is_flag=True, default=False, help="turn on debugging")
+@click.argument('files', nargs=-1, type=click.Path(exists=True))
+def main(all, size, debug, files):
+
+    names = files
+    if not files:
+        names = os.listdir()
+        if not all:
+            names = [ n for n in names if not n.startswith('.') ]
+    names.sort()
+
+    grid = NameGrid(names, size)
+    cols = grid.cols()
+
+    if debug:
+        print("grid is %r" % grid)
+
+    for h in range(grid.rows()):
+        for wi in range(grid.rowheight()):
+            for w in range(grid.cols()):
+                i = w * grid.rows() + h
+                name = getitem(names, i, '')
+                end = '\r\n' if w == cols - 1 else ''
+                print(grid.format_name(name, wi), end=end)
+
+
+if __name__ == '__main__':
+    main()
+
