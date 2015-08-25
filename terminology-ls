@@ -1,6 +1,7 @@
 #!/usr/bin/python3
 
 import sys
+import string
 import os.path
 import functools
 
@@ -67,25 +68,31 @@ class TerminologyTerm(object):
 
 
 class NameGrid(object):
-    def __init__(self, names, size):
+    def __init__(self, names, size, debug=False):
         self.names = names
         self.term = TerminologyTerm()
         self.sizename = size
-        self.size = self.SIZES[size]
+        self.size = dict(self.SIZES)[size]
+        self.debug = debug
 
-    SIZES = { 'small': (2, 1),
-              'medium': (4, 2),
-              'large':(8, 4)
-             }
+    SIZES = ( ('small', (2, 1)),
+              ('medium', (4, 2)),
+              ('large',(8, 4))
+             )
 
     def __repr__(self):
-        return '<NameGrid size %s of %d names on %r column screen>' % (self.sizename, len(self.names), Terminal().width)
+        msg = '<NameGrid (%s) %d names on %r column screen>' % (self.sizename, len(self.names), Terminal().width)
+        return msg
 
     @memoize
     def cols(self):
         #w, h, fw, fh = self.term.qs()
-        w = Terminal().width or 0 # if not a tty, .width is None
-        return (w // self.colwidth()) or 3
+        w = Terminal().width
+        if w is None:
+            # if not a tty, .width is None
+            return 1
+        # -1 in case we'd use the last column
+        return (w-1) // self.colwidth()
 
     @memoize
     def rows(self):
@@ -98,26 +105,33 @@ class NameGrid(object):
     @memoize
     def colwidth(self):
         namemaxlen = max(len(n) for n in self.names)
-        colwidth = namemaxlen + 1 # buffer space
-        colwidth += self.size[0]
+        colwidth = 1              # buffer space before icon
+        colwidth += self.size[0]  # icon width
+        colwidth += 1             # buffer space after icon
+        colwidth += namemaxlen
         return colwidth
 
     def rowheight(self):
         return self.size[1]
 
-    def format_name(self, name, i):
+    def format_name(self, name, i, rchar):
         """
         return the i'th row of 'name' formatted
         into a grid square
         """
         w, h = self.size
         if name:
-            if i == 0:
-                self.term.it(w, h, os.path.abspath(name))
+            if self.debug:
+                print(w * rchar, end='')
+            elif i == 0:
+                self.term.it(w, h, os.path.abspath(name), rchar=rchar)
             else:
-                self.term.ibie(w)
+                self.term.ibie(w, rchar=rchar)
                 name = ''
-        fmt = "{:<" + str(self.colwidth()) + "}"
+        width = self.colwidth()  # full width
+        width -= self.size[0]    # icon width (in .ibie() call above)
+        width -= 1               # buffer space after icon
+        fmt = " {:<" + str(width) + "}"
         return fmt.format(name)
 
 
@@ -134,32 +148,33 @@ def getitem(l, i, default):
 
 @click.command()
 @click.option('--all', '-a', is_flag=True, default=False, help="show hidden files")
-@click.option('--size', default='small', type=click.Choice(['small', 'medium', 'large']),
+@click.option('--size', default='small', type=click.Choice(name for name, size in NameGrid.SIZES),
               help="icon size")
 @click.option('--debug', is_flag=True, default=False, help="turn on debugging")
 @click.argument('files', nargs=-1, type=click.Path(exists=True))
 def main(all, size, debug, files):
 
-    names = files
+    names = list(files)
     if not files:
         names = os.listdir()
         if not all:
             names = [ n for n in names if not n.startswith('.') ]
     names.sort()
 
-    grid = NameGrid(names, size)
+    grid = NameGrid(names, size, debug=debug)
+    if debug:
+        print("Grid is " + repr(grid))
+
     cols = grid.cols()
 
-    if debug:
-        print("grid is %r" % grid)
-
-    for h in range(grid.rows()):
-        for wi in range(grid.rowheight()):
-            for w in range(grid.cols()):
-                i = w * grid.rows() + h
+    for gridrow in range(grid.rows()):
+        for itemrow in range(grid.rowheight()):
+            for gridcol in range(grid.cols()):
+                i = gridcol * grid.rows() + gridrow
                 name = getitem(names, i, '')
-                end = '\r\n' if w == cols - 1 else ''
-                print(grid.format_name(name, wi), end=end)
+                end = '\n' if gridcol == cols - 1 else ''
+                rchar = string.printable[gridcol % len(string.printable)]
+                print(grid.format_name(name, itemrow, rchar), end=end)
 
 
 if __name__ == '__main__':
