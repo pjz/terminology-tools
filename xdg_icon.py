@@ -1,4 +1,6 @@
 
+
+
 import os.path
 
 
@@ -34,10 +36,11 @@ def icon_for_executable(name):
     return 'application-x-executable'
 
 
+# or: run file -i, extract the mime-type, replace the / with a -
 BASIC_EXTS = {
-    ".mp3": "audio-x-mpeg.svg",
-    ".aac": "audio-x-generic.svg",
-    ".wav": "audio-x-wav.svg",
+    ".mp3": "audio-x-mpeg",
+    ".aac": "audio-x-generic",
+    ".wav": "audio-x-wav",
     ".m3u": "audio-x-mp3-playlist",
     ".patch": "text-x-generic",
     ".diff": "text-x-generic",
